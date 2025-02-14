@@ -1,5 +1,5 @@
 # Invoke-VirtIODrivers
-Downloads the latest VirtIO ISO if necessary, copies the ISO locally if necessary, mounts the ISO automatically, dynamically detects the operating system, and installs the correct drivers for Proxmox virtual machines into the Windows driver store using DISM.
+Downloads the latest VirtIO ISO if necessary, copies the ISO locally if necessary, mounts the ISO automatically, dynamically detects the operating system, and installs the correct drivers for Proxmox virtual machines into the Windows driver store using DISM or PNPUTIL.
 
 This script can be run from a WindowsPE boot image before the operating system has been deployed or directly within the full operating system to install the drivers after the fact or before a hypervisor migration. (VMWare to Proxmox)
 
