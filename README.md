@@ -1,7 +1,9 @@
 # Invoke-VirtIODrivers
 Downloads the latest VirtIO ISO if necessary, copies the ISO locally if necessary, mounts the ISO automatically, dynamically detects the operating system, and installs the correct drivers for Proxmox virtual machines into the Windows driver store using DISM or PNPUTIL.
 
-This script can be run from a WindowsPE boot image before the operating system has been deployed or directly within the full operating system to install the drivers after the fact or before a hypervisor migration. (VMWare to Proxmox)
+This script can be run from a WindowsPE boot image after the operating system has been deployed to the fixed disk and the target volume will be located automatically by locating a valid installation of Windows.
+
+This script can also be directly used within the full operating system to install the drivers after the fact or before a hypervisor migration. (VMWare to Proxmox).
 
 During Hypervisor migration scenarios where WindowsPE will likely not be invovled, just run this powershell script before migration to get the drivers staged into the driver store. Then once the virtual machine has been migrated, it should be able boot just fine when using VirtIO SCSI disk controllers, and virtual network adapters. No more blue screens!
 
