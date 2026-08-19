@@ -27,7 +27,7 @@ pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODriver
 | `-Install` | Download the VirtIO driver ISO (if required) and install the relevant drivers for the detected operating system. |
 | `-InstallGuestAgent` | Install the QEMU guest agent from the mounted ISO. Recommended on every run: the installation is skipped automatically within WindowsPE (where the Windows Installer service is unavailable) and when the installed version is already current. |
 | `-DownloadURL` | Override the VirtIO ISO download URL. Defaults to the latest stable VirtIO ISO. |
-| `-DownloadDestinationDirectory` | Override the ISO download destination. Defaults to `Content\ISOs` beside the script. |
+| `-DownloadDestinationDirectory` | Override the ISO download destination. Defaults to `Content\ISOs` beside the script. Any ISO already present there is used as-is regardless of its file name (the latest one wins), and the download is skipped entirely. |
 | `-LogDirectory` | Override the log directory. Sensible defaults are used for WindowsPE, task sequence, and full operating system scenarios. |
 
 The ISO download automatically detects and uses the system default proxy with default credentials.

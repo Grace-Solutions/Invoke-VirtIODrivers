@@ -19,6 +19,7 @@
 
     .PARAMETER DownloadURL
     The URL where the VirtIO driver ISO is located. If this parameter is not specified, the latest stable VirtIO ISO will be downloaded.
+    The download is skipped entirely whenever any ISO image already exists within the download destination directory (regardless of its file name), and the latest existing ISO is used instead.
 
     .PARAMETER DownloadDestinationDirectory
     The directory path where the VirtIO driver ISO will be downloaded to. If this parameter is not specified, the "Content\ISOs" directory located within the script directory will be used.
@@ -292,15 +293,34 @@ Switch (Test-ProcessElevationStatus)
                       {
                           {($_ -eq $True)}
                             {
-                                #region Download the latest ISO (If necessary)
-                                  $InvokeFileDownloadWithProgressParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
-                                    $InvokeFileDownloadWithProgressParameters.URL = $DownloadURL
-                                    $InvokeFileDownloadWithProgressParameters.Destination = $DownloadDestinationDirectory.FullName
-                                    $InvokeFileDownloadWithProgressParameters.FileName = [System.IO.Path]::GetFileName($DownloadURL.OriginalString)
-                                    $InvokeFileDownloadWithProgressParameters.ContinueOnError = $False
-                                    $InvokeFileDownloadWithProgressParameters.Verbose = $True
+                                #region Stage the ISO (Any existing ISO within the download destination directory is used as-is regardless of its file name, otherwise the ISO is downloaded)
+                                  $ExistingISOList = Get-ChildItem -Path ($DownloadDestinationDirectory.FullName) -Filter '*.iso' -Force -ErrorAction SilentlyContinue | Where-Object {($_ -is [System.IO.FileInfo])}
 
-                                  $InvokeFileDownloadWithProgressResult = Invoke-FileDownloadWithProgress @InvokeFileDownloadWithProgressParameters
+                                  $ExistingISOListCount = ($ExistingISOList | Measure-Object).Count
+
+                                  Switch ($ExistingISOListCount -gt 0)
+                                    {
+                                        {($_ -eq $True)}
+                                          {
+                                              $StagedISOPath = $ExistingISOList | Sort-Object -Property @('LastWriteTime') -Descending | Select-Object -First 1
+
+                                              $WriteLogMessage.Invoke(0, @("Found $($ExistingISOListCount) existing ISO image(s) within `"$($DownloadDestinationDirectory.FullName)`". The download will be skipped.", "Latest Existing ISO Image: $($StagedISOPath.FullName)"))
+                                          }
+
+                                        Default
+                                          {
+                                              $InvokeFileDownloadWithProgressParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+                                                $InvokeFileDownloadWithProgressParameters.URL = $DownloadURL
+                                                $InvokeFileDownloadWithProgressParameters.Destination = $DownloadDestinationDirectory.FullName
+                                                $InvokeFileDownloadWithProgressParameters.FileName = [System.IO.Path]::GetFileName($DownloadURL.OriginalString)
+                                                $InvokeFileDownloadWithProgressParameters.ContinueOnError = $False
+                                                $InvokeFileDownloadWithProgressParameters.Verbose = $True
+
+                                              $InvokeFileDownloadWithProgressResult = Invoke-FileDownloadWithProgress @InvokeFileDownloadWithProgressParameters
+
+                                              $StagedISOPath = $InvokeFileDownloadWithProgressResult.DownloadPath
+                                          }
+                                    }
                                 #endregion
 
                                 #region Copy the downloaded ISO file locally if a UNC path is detected, in order to avoid file lock issues
@@ -313,7 +333,7 @@ Switch (Test-ProcessElevationStatus)
                                               $WriteLogMessage.Invoke(0, @("A UNC path was detected for the download destination directory. Attempting to copy the downloaded file locally. Please Wait..."))
 
                                               $CopyItemWithProgressParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
-                                                $CopyItemWithProgressParameters.Path = $InvokeFileDownloadWithProgressResult.DownloadPath.FullName
+                                                $CopyItemWithProgressParameters.Path = $StagedISOPath.FullName
                                                 $CopyItemWithProgressParameters.Destination = [System.IO.Path]::Combine($WindowsImageDetails.InstallLocation.FullName, 'Temp', 'ISOs')
                                                 $CopyItemWithProgressParameters.Include = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
                                                   $CopyItemWithProgressParameters.Include.Add('*.iso')
