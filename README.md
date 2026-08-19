@@ -1,13 +1,59 @@
 # Invoke-VirtIODrivers
-Downloads the latest VirtIO ISO if necessary, copies the ISO locally if necessary, mounts the ISO automatically, dynamically detects the operating system, and installs the correct drivers for Proxmox virtual machines into the Windows driver store using DISM or PNPUTIL.
+
+Downloads the latest VirtIO ISO if necessary, copies the ISO locally if necessary, mounts the ISO automatically, dynamically detects the operating system, and installs the correct drivers for Proxmox virtual machines into the Windows driver store using DISM or PNPUTIL. The QEMU guest agent can optionally be installed directly from the mounted ISO when running within the full operating system.
 
 This script can be run from a WindowsPE boot image after the operating system has been deployed to the fixed disk and the target volume will be located automatically by locating a valid installation of Windows.
 
 This script can also be directly used within the full operating system to install the drivers after the fact or before a hypervisor migration. (VMWare to Proxmox).
 
-During Hypervisor migration scenarios where WindowsPE will likely not be invovled, just run this powershell script before migration to get the drivers staged into the driver store. Then once the virtual machine has been migrated, it should be able boot just fine when using VirtIO SCSI disk controllers, and virtual network adapters. No more blue screens!
+During Hypervisor migration scenarios where WindowsPE will likely not be involved, just run this powershell script before migration to get the drivers staged into the driver store. Then once the virtual machine has been migrated, it should be able to boot just fine when using VirtIO SCSI disk controllers, and virtual network adapters. No more blue screens!
 
-Note: The VBScript is just there as a powershell bootstrapper. If you double click the VBS script, it simply executes the Powershell script with the same name automatically and shows the execution window. Nothing more.
+## Structure
+
+The script follows the standardized script template and toolkit flow. The `Toolkit\Toolkit.ps1` script is dot sourced during initialization and provides the logging, error handling, environment detection, and function/module/library loading infrastructure. The reusable helper functions live within `Toolkit\Functions`, and the registry parsing libraries live within `Toolkit\Libraries\Registry`.
+
+The script is compatible with both Windows PowerShell 5.1 (including the WindowsPE PowerShell optional component) and PowerShell 7.
+
+## Usage
+
+```powershell
+#Install the VirtIO drivers (WindowsPE or full operating system)
+powershell.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install
+
+#Install the VirtIO drivers and the QEMU guest agent (Full operating system)
+pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
+```
+
+| Parameter | Description |
+|:--|:--|
+| `-Install` | Download the VirtIO driver ISO (if required) and install the relevant drivers for the detected operating system. |
+| `-InstallGuestAgent` | Install the QEMU guest agent from the mounted ISO. Only performed within the full operating system (skipped within WindowsPE, where the Windows Installer service is unavailable). The installation is skipped when the installed version is already current. |
+| `-DownloadURL` | Override the VirtIO ISO download URL. Defaults to the latest stable VirtIO ISO. |
+| `-DownloadDestinationDirectory` | Override the ISO download destination. Defaults to `Content\ISOs` beside the script. |
+| `-LogDirectory` | Override the log directory. Sensible defaults are used for WindowsPE, task sequence, and full operating system scenarios. |
+
+The ISO download automatically detects and uses the system default proxy with default credentials.
+
+## OS deployment scenarios (DeployR, MDT, SCCM)
+
+During OS deployment the script needs to run **twice**:
+
+1. **Boot image (WindowsPE)** — after the operating system image has been applied, run with `-Install` to inject the VirtIO drivers into the offline operating system using DISM, so the deployed OS can boot on VirtIO virtual hardware on first startup.
+2. **Full operating system** — run again with `-Install -InstallGuestAgent` to register the drivers with pnputil and install the QEMU guest agent (which cannot be installed within WindowsPE).
+
+OS detection is handled automatically in both passes, so the command line is the same aside from the interpreter. DeployR boot images only contain PowerShell 7, so the script must be launched with `pwsh.exe` there:
+
+```powershell
+pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install
+```
+
+Note: the boot image itself must already contain the VirtIO drivers (added ahead of time using your preferred boot image servicing method), otherwise WindowsPE cannot see VirtIO SCSI disks or network adapters. Alternatively, the virtual machine can use non-VirtIO virtual hardware (for example SATA disks and an emulated E1000 network adapter), which works without servicing the boot image but carries a performance penalty.
+
+Note: `Invoke-VirtIODrivers.exe` is just there as a powershell bootstrapper. If you double click the executable, it simply executes the Powershell script with the same name automatically and shows the execution window. Nothing more.
+
+## Offline registry hive detection
+
+Within WindowsPE, the deployed operating system details are read directly from the offline `SOFTWARE` registry hive of the deployed volume **without loading or mounting the hive**, using the [Eric Zimmerman Registry library](https://github.com/EricZimmerman/Registry) (version 2026.5.0, netstandard2.0), which parses the raw REGF hive file format. The library and its dependency closure are stored within `Toolkit\Libraries\Registry` and are loaded into memory in dependency order (no file locks): byte loaded within Windows PowerShell, and stream loaded into a dedicated assembly load context within PowerShell 7.
 
 <img width="827" alt="Snag_612d0a7" src="https://github.com/user-attachments/assets/94b2a150-3b33-4220-ae22-69dff1954ee7" />
 <img width="519" alt="Snag_612df8b" src="https://github.com/user-attachments/assets/e8039cfb-63fe-4761-b3ee-1fddadb28370" />
