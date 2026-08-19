@@ -7,7 +7,8 @@ Function Invoke-FileDownloadWithProgress
 
           .DESCRIPTION
           The file will only be downloaded if the last modified date of the source URL is different from the last modified date of the file that has already been downloaded or if the file has not already been downloaded.
-          By default, the system default proxy with default credentials will be used. An explicit proxy can be specified with the ProxyURI parameter, optionally with a dedicated credential.
+          By default, the system default proxy is automatically detected: when a proxy applies to the download URL it is used with default credentials, and otherwise the connection is made directly. An explicit proxy can be specified with the ProxyURI parameter, optionally with a dedicated credential.
+          When the download URL cannot be contacted (for example within Windows PE without internet access) and the destination file already exists, the existing local copy is used and no error is raised. The failure is only fatal when no local copy exists.
 
           .PARAMETER URL
           The URL where the file is located.
@@ -143,17 +144,40 @@ Function Invoke-FileDownloadWithProgress
 
                           Default
                             {
-                                $WebProxy = [System.Net.WebRequest]::DefaultWebProxy
+                                #Determine whether the system default proxy actually applies to the download URL (If not, the connection will be made directly)
+                                  $SystemProxy = [System.Net.WebRequest]::DefaultWebProxy
 
-                                Switch ($Null -ine $WebProxy)
-                                  {
-                                      {($_ -eq $True)}
-                                        {
-                                            $WriteLogMessage.Invoke(0, @("The system default proxy with default credentials will be used."))
+                                  $WebProxy = $Null
 
-                                            $WebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-                                        }
-                                  }
+                                  Switch ($Null -ine $SystemProxy)
+                                    {
+                                        {($_ -eq $True)}
+                                          {
+                                              $ProxyURIForRequest = Try {$SystemProxy.GetProxy($URL)} Catch {$Null}
+
+                                              Switch (($Null -ine $ProxyURIForRequest) -and ($ProxyURIForRequest.AbsoluteURI -ine $URL.AbsoluteURI) -and ($SystemProxy.IsBypassed($URL) -eq $False))
+                                                {
+                                                    {($_ -eq $True)}
+                                                      {
+                                                          $WriteLogMessage.Invoke(0, @("A system default proxy was detected and will be used with default credentials. [Proxy: $($ProxyURIForRequest.AbsoluteURI)]"))
+
+                                                          $SystemProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+
+                                                          $WebProxy = $SystemProxy
+                                                      }
+
+                                                    Default
+                                                      {
+                                                          $WriteLogMessage.Invoke(0, @("No proxy was detected. The connection will be made directly."))
+                                                      }
+                                                }
+                                          }
+
+                                        Default
+                                          {
+                                              $WriteLogMessage.Invoke(0, @("No proxy was detected. The connection will be made directly."))
+                                          }
+                                    }
                             }
                       }
 
@@ -268,44 +292,60 @@ Function Invoke-FileDownloadWithProgress
         {
             Try
               {
-                  $WriteLogMessage.Invoke(0, @("Attempting to create a web request for `"$($URL.OriginalString)`". Please Wait..."))
+                  #region Attempt to contact the download URL for metadata (A failure here is only fatal when no local copy of the file exists)
+                    $WebRequestSucceeded = $False
 
-                  $WebRequest = [System.Net.WebRequest]::Create($URL.AbsoluteURI)
-                    $WebRequest.Proxy = $WebProxy
-                    $WebRequest.UseDefaultCredentials = $True
+                    $URLLastModifiedAvailable = $False
 
-                  $WebRequestResponse = $WebRequest.GetResponse()
-
-                  $WriteLogMessage.Invoke(0, @("Web Request Response Status: $($WebRequestResponse.StatusCode) [Status Code: $($WebRequestResponse.StatusCode.value__)]"))
-
-                  $WebRequestResponseHeaders = $WebRequestResponse.Headers
-
-                  $WebRequestHeaderProperties = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
-
-                  ForEach ($WebRequestResponseHeader In $WebRequestResponseHeaders.AllKeys)
-                    {
-                        $WebRequestHeaderProperties."$($WebRequestResponseHeader)" = ($WebRequestResponseHeaders.GetValues($WebRequestResponseHeader))[0]
-                    }
-
-                  $WebRequestHeaders = New-Object -TypeName 'PSObject' -Property ($WebRequestHeaderProperties)
-
-                  #Determine whether the source URL exposes a last modified date (Not all web servers do)
-                    $URLLastModifiedAvailable = ([String]::IsNullOrEmpty($WebRequestHeaders.'Last-Modified') -eq $False) -and ([String]::IsNullOrWhiteSpace($WebRequestHeaders.'Last-Modified') -eq $False)
-
-                    Switch ($URLLastModifiedAvailable)
+                    Try
                       {
-                          {($_ -eq $True)}
+                          $WriteLogMessage.Invoke(0, @("Attempting to create a web request for `"$($URL.OriginalString)`". Please Wait..."))
+
+                          $WebRequest = [System.Net.WebRequest]::Create($URL.AbsoluteURI)
+                            $WebRequest.Proxy = $WebProxy
+                            $WebRequest.UseDefaultCredentials = $True
+                            $WebRequest.Timeout = [System.Convert]::ToInt32([System.TimeSpan]::FromSeconds(30).TotalMilliseconds)
+
+                          $WebRequestResponse = $WebRequest.GetResponse()
+
+                          $WriteLogMessage.Invoke(0, @("Web Request Response Status: $($WebRequestResponse.StatusCode) [Status Code: $($WebRequestResponse.StatusCode.value__)]"))
+
+                          $WebRequestResponseHeaders = $WebRequestResponse.Headers
+
+                          $WebRequestHeaderProperties = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+
+                          ForEach ($WebRequestResponseHeader In $WebRequestResponseHeaders.AllKeys)
                             {
-                                $WebRequestHeaders.'Last-Modified' = (Get-Date -Date $WebRequestHeaders.'Last-Modified').ToUniversalTime()
+                                $WebRequestHeaderProperties."$($WebRequestResponseHeader)" = ($WebRequestResponseHeaders.GetValues($WebRequestResponseHeader))[0]
                             }
 
-                          {($_ -eq $False)}
-                            {
-                                $WriteLogMessage.Invoke(2, @("The source URL does not expose a `"Last-Modified`" header. The download will only be skipped if the destination file already exists."))
-                            }
+                          $WebRequestHeaders = New-Object -TypeName 'PSObject' -Property ($WebRequestHeaderProperties)
+
+                          #Determine whether the source URL exposes a last modified date (Not all web servers do)
+                            $URLLastModifiedAvailable = ([String]::IsNullOrEmpty($WebRequestHeaders.'Last-Modified') -eq $False) -and ([String]::IsNullOrWhiteSpace($WebRequestHeaders.'Last-Modified') -eq $False)
+
+                            Switch ($URLLastModifiedAvailable)
+                              {
+                                  {($_ -eq $True)}
+                                    {
+                                        $WebRequestHeaders.'Last-Modified' = (Get-Date -Date $WebRequestHeaders.'Last-Modified').ToUniversalTime()
+                                    }
+
+                                  {($_ -eq $False)}
+                                    {
+                                        $WriteLogMessage.Invoke(2, @("The source URL does not expose a `"Last-Modified`" header. The download will only be skipped if the destination file already exists."))
+                                    }
+                              }
+
+                          $ContentLengthInMB = [System.Math]::Round(($WebRequestHeaders.'Content-Length' / 1MB), 2)
+
+                          $WebRequestSucceeded = $True
                       }
-
-                  $ContentLengthInMB = [System.Math]::Round(($WebRequestHeaders.'Content-Length' / 1MB), 2)
+                    Catch
+                      {
+                          $WriteLogMessage.Invoke(2, @("Unable to contact the download URL `"$($URL.OriginalString)`". [Error: $($_.Exception.Message)]"))
+                      }
+                  #endregion
 
                   $DownloadExecutionStopwatch = New-Object -TypeName 'System.Diagnostics.Stopwatch'
 
@@ -431,9 +471,21 @@ Function Invoke-FileDownloadWithProgress
                                                         }
                                                   }
 
-                  Switch ([System.IO.File]::Exists($DestinationPath.FullName))
+                  Switch ($True)
                     {
-                        {($_ -eq $True)}
+                        {($WebRequestSucceeded -eq $False) -and ([System.IO.File]::Exists($DestinationPath.FullName) -eq $True)}
+                          {
+                              $WriteLogMessage.Invoke(2, @("The download URL could not be contacted, but destination path `"$($DestinationPath.FullName)`" already exists. The existing local copy will be used."))
+
+                              Break
+                          }
+
+                        {($WebRequestSucceeded -eq $False) -and ([System.IO.File]::Exists($DestinationPath.FullName) -eq $False)}
+                          {
+                              Throw "The download URL `"$($URL.OriginalString)`" could not be contacted and destination path `"$($DestinationPath.FullName)`" does not exist."
+                          }
+
+                        {([System.IO.File]::Exists($DestinationPath.FullName) -eq $True)}
                           {
                               $WriteLogMessage.Invoke(0, @("Destination path `"$($DestinationPath.FullName)`" already exists."))
 
@@ -470,6 +522,8 @@ Function Invoke-FileDownloadWithProgress
                                           $WriteLogMessage.Invoke(0, @("A redownload of `"$($URL.OriginalString)`" is not necessary."))
                                       }
                                 }
+
+                              Break
                           }
 
                         Default
