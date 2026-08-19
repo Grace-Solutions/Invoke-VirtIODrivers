@@ -15,7 +15,7 @@
     Download the VirtIO driver ISO (if required) and install the relevant VirtIO drivers for the deployed operating system.
 
     .PARAMETER InstallGuestAgent
-    Install the QEMU guest agent from the mounted VirtIO driver ISO. This operation is only supported within the full operating system and will be skipped within Windows PE.
+    Install the QEMU guest agent from the mounted VirtIO driver ISO. This operation is only supported within the full operating system and will be skipped within Windows PE. The installation is also skipped when the installed version is already current, so this switch is safe to specify on every run.
 
     .PARAMETER DownloadURL
     The URL where the VirtIO driver ISO is located. If this parameter is not specified, the latest stable VirtIO ISO will be downloaded.
@@ -30,18 +30,18 @@
     Ignore failures.
 
     .EXAMPLE
-    powershell.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File "%FolderPathContainingScript%\Invoke-VirtIODrivers.ps1" -Install
+    powershell.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File "%FolderPathContainingScript%\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
 
     .EXAMPLE
     pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File "%FolderPathContainingScript%\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
 
     .EXAMPLE
-    powershell.exe -ExecutionPolicy Bypass -NonInteractive -NoProfile -NoLogo -WindowStyle Hidden -Command "& '%FolderPathContainingScript%\Invoke-VirtIODrivers.ps1' -Install -DownloadURL 'https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-virtio/virtio-win.iso'"
+    powershell.exe -ExecutionPolicy Bypass -NonInteractive -NoProfile -NoLogo -WindowStyle Hidden -Command "& '%FolderPathContainingScript%\Invoke-VirtIODrivers.ps1' -Install -InstallGuestAgent -DownloadURL 'https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-virtio/virtio-win.iso'"
 
     .NOTES
     Within Windows PE, drivers are injected into the offline operating system using DISM. Within the full operating system, drivers are installed using pnputil.
 
-    During OS deployment scenarios (DeployR, MDT, SCCM), the script runs twice: once within the boot image (Windows PE) using "-Install", and once within the full operating system using "-Install -InstallGuestAgent". OS detection is handled automatically in both passes. DeployR boot images only contain PowerShell 7, so the script must be launched with pwsh.exe there.
+    During OS deployment scenarios (DeployR, MDT, SCCM), the script runs twice with the same command line ("-Install -InstallGuestAgent"): once within the boot image (Windows PE) and once within the full operating system. The guest agent portion is skipped automatically within Windows PE and when the installed version is already current. OS detection is handled automatically in both passes. DeployR boot images only contain PowerShell 7, so the script must be launched with pwsh.exe there.
 
     The ISO download automatically detects and uses the system default proxy with default credentials.
 
@@ -280,7 +280,7 @@ Switch (Test-ProcessElevationStatus)
                       {
                           {($InstallGuestAgent.IsPresent -eq $True) -and ($IsWindowsPE -eq $True)}
                             {
-                                $WriteLogMessage.Invoke(2, @("The `"-InstallGuestAgent`" parameter was specified, but the QEMU guest agent cannot be installed within Windows PE. The operation will be skipped."))
+                                $WriteLogMessage.Invoke(0, @("The QEMU guest agent installation will be skipped because it is not supported within Windows PE."))
                             }
                       }
 

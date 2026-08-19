@@ -15,17 +15,17 @@ The script is compatible with both Windows PowerShell 5.1 (including the Windows
 ## Usage
 
 ```powershell
-#Install the VirtIO drivers (WindowsPE or full operating system)
-powershell.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install
+#Install the VirtIO drivers and the QEMU guest agent (works in WindowsPE and the full operating system - the guest agent portion is skipped automatically within WindowsPE and when it is already installed)
+powershell.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
 
-#Install the VirtIO drivers and the QEMU guest agent (Full operating system)
+#Same command using PowerShell 7 (required within DeployR boot images)
 pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
 ```
 
 | Parameter | Description |
 |:--|:--|
 | `-Install` | Download the VirtIO driver ISO (if required) and install the relevant drivers for the detected operating system. |
-| `-InstallGuestAgent` | Install the QEMU guest agent from the mounted ISO. Only performed within the full operating system (skipped within WindowsPE, where the Windows Installer service is unavailable). The installation is skipped when the installed version is already current. |
+| `-InstallGuestAgent` | Install the QEMU guest agent from the mounted ISO. Recommended on every run: the installation is skipped automatically within WindowsPE (where the Windows Installer service is unavailable) and when the installed version is already current. |
 | `-DownloadURL` | Override the VirtIO ISO download URL. Defaults to the latest stable VirtIO ISO. |
 | `-DownloadDestinationDirectory` | Override the ISO download destination. Defaults to `Content\ISOs` beside the script. |
 | `-LogDirectory` | Override the log directory. Sensible defaults are used for WindowsPE, task sequence, and full operating system scenarios. |
@@ -36,13 +36,13 @@ The ISO download automatically detects and uses the system default proxy with de
 
 During OS deployment the script needs to run **twice**:
 
-1. **Boot image (WindowsPE)** — after the operating system image has been applied, run with `-Install` to inject the VirtIO drivers into the offline operating system using DISM, so the deployed OS can boot on VirtIO virtual hardware on first startup.
-2. **Full operating system** — run again with `-Install -InstallGuestAgent` to register the drivers with pnputil and install the QEMU guest agent (which cannot be installed within WindowsPE).
+1. **Boot image (WindowsPE)** — after the operating system image has been applied, run with `-Install -InstallGuestAgent` to inject the VirtIO drivers into the offline operating system using DISM, so the deployed OS can boot on VirtIO virtual hardware on first startup (the guest agent portion is skipped automatically within WindowsPE).
+2. **Full operating system** — run the same command again to register the drivers with pnputil and install the QEMU guest agent.
 
 OS detection is handled automatically in both passes, so the command line is the same aside from the interpreter. DeployR boot images only contain PowerShell 7, so the script must be launched with `pwsh.exe` there:
 
 ```powershell
-pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install
+pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
 ```
 
 Note: the boot image itself must already contain the VirtIO drivers (added ahead of time using your preferred boot image servicing method), otherwise WindowsPE cannot see VirtIO SCSI disks or network adapters. Alternatively, the virtual machine can use non-VirtIO virtual hardware (for example SATA disks and an emulated E1000 network adapter), which works without servicing the boot image but carries a performance penalty.
@@ -51,7 +51,7 @@ Note: the boot image itself must already contain the VirtIO drivers (added ahead
 
 **Template creation**: run the script within the full operating system with `-Install -InstallGuestAgent` before converting the virtual machine into a template, so every clone comes up VirtIO-ready with the QEMU guest agent already installed.
 
-**Hypervisor migration (VMware ESXi to Proxmox)**: run the script within the full operating system with `-Install` before the migration. The VirtIO devices do not exist yet at that point, so pnputil simply stages the driver packages into the Windows driver store. On first boot under the new hypervisor, Plug and Play matches the staged drivers automatically and the VM boots on VirtIO SCSI disk controllers and virtual network adapters without a recovery pass. No more blue screens!
+**Hypervisor migration (VMware ESXi to Proxmox)**: run the script within the full operating system with `-Install -InstallGuestAgent` before the migration. The VirtIO devices do not exist yet at that point, so pnputil simply stages the driver packages into the Windows driver store. On first boot under the new hypervisor, Plug and Play matches the staged drivers automatically and the VM boots on VirtIO SCSI disk controllers and virtual network adapters without a recovery pass. No more blue screens!
 
 This exact flow was used in a production migration from VMware ESXi to Proxmox: the script was run within the full operating system of each VM before migration, and after cutover, over 30 Windows VMs came up without issue.
 
