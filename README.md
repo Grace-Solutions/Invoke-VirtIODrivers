@@ -6,8 +6,6 @@ This script can be run from a WindowsPE boot image after the operating system ha
 
 This script can also be directly used within the full operating system to install the drivers after the fact or before a hypervisor migration. (VMWare to Proxmox).
 
-During Hypervisor migration scenarios where WindowsPE will likely not be involved, just run this powershell script before migration to get the drivers staged into the driver store. Then once the virtual machine has been migrated, it should be able to boot just fine when using VirtIO SCSI disk controllers, and virtual network adapters. No more blue screens!
-
 ## Structure
 
 The script follows the standardized script template and toolkit flow. The `Toolkit\Toolkit.ps1` script is dot sourced during initialization and provides the logging, error handling, environment detection, and function/module/library loading infrastructure. The reusable helper functions live within `Toolkit\Functions`, and the registry parsing libraries live within `Toolkit\Libraries\Registry`.
@@ -48,6 +46,16 @@ pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODriver
 ```
 
 Note: the boot image itself must already contain the VirtIO drivers (added ahead of time using your preferred boot image servicing method), otherwise WindowsPE cannot see VirtIO SCSI disks or network adapters. Alternatively, the virtual machine can use non-VirtIO virtual hardware (for example SATA disks and an emulated E1000 network adapter), which works without servicing the boot image but carries a performance penalty.
+
+## Virtual machine templates and hypervisor migration
+
+**Template creation**: run the script within the full operating system with `-Install -InstallGuestAgent` before converting the virtual machine into a template, so every clone comes up VirtIO-ready with the QEMU guest agent already installed.
+
+**Hypervisor migration (VMware ESXi to Proxmox)**: run the script within the full operating system with `-Install` before the migration. The VirtIO devices do not exist yet at that point, so pnputil simply stages the driver packages into the Windows driver store. On first boot under the new hypervisor, Plug and Play matches the staged drivers automatically and the VM boots on VirtIO SCSI disk controllers and virtual network adapters without a recovery pass. No more blue screens!
+
+This exact flow was used in a production migration from VMware ESXi to Proxmox: the script was run within the full operating system of each VM before migration, and after cutover, over 30 Windows VMs came up without issue.
+
+Re-running the script is always safe: the Windows driver store handles already-present driver packages (pnputil and DISM skip or version-rank existing packages rather than creating conflicts), so drivers that are already installed are never a problem.
 
 Note: `Invoke-VirtIODrivers.exe` is just there as a powershell bootstrapper. If you double click the executable, it simply executes the Powershell script with the same name automatically and shows the execution window. Nothing more.
 
