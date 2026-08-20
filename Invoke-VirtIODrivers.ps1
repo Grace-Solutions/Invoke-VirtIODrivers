@@ -1,4 +1,4 @@
-#Requires -Version 5 -Modules Storage
+#Requires -Version 5
 
 <#
     .SYNOPSIS
@@ -9,13 +9,29 @@
 
     Within Windows PE, the deployed operating system details are determined by reading the registry hive of the offline operating system volume, and the drivers are injected into the offline operating system using DISM.
 
-    Within the full operating system, the drivers are installed using pnputil, and the QEMU guest agent can optionally be installed directly from the mounted ISO.
+    Within the full operating system, the drivers are installed using pnputil, and the QEMU guest agent can optionally be installed directly from the mounted ISO. The SPICE guest tools can also optionally be downloaded and installed.
 
     .PARAMETER Install
     Download the VirtIO driver ISO (if required) and install the relevant VirtIO drivers for the deployed operating system.
 
     .PARAMETER InstallGuestAgent
     Install the QEMU guest agent from the mounted VirtIO driver ISO. This operation is only supported within the full operating system and will be skipped within Windows PE. The installation is also skipped when the installed version is already current, so this switch is safe to specify on every run.
+
+    .PARAMETER InstallSpiceGuestTools
+    Install the SPICE guest tools. The installer is downloaded separately because it is not included within the VirtIO driver ISO.
+    Before the silent installation is performed, the driver signing certificate(s) found within the VirtIO driver ISO catalog files are imported into the local machine trusted publishers store, so that the bundled driver installations do not produce prompts.
+    This operation is only supported within the full operating system and will be skipped within Windows PE. The installation is also skipped when the SPICE guest tools are already installed, so this switch is safe to specify on every run.
+
+    .PARAMETER SpiceGuestToolsDownloadURL
+    The URL where the SPICE guest tools installer is located. If this parameter is not specified, the latest SPICE guest tools installer will be downloaded.
+    The download is skipped entirely whenever an installer already exists within the destination directory.
+
+    .PARAMETER SpiceGuestToolsDestinationDirectory
+    The directory path where the SPICE guest tools installer will be downloaded to. If this parameter is not specified, the "Installers" directory located within the local download directory ("%WinDir%\Temp\<ScriptBaseName>") will be used.
+
+    .PARAMETER ArchiveUtilityDownloadURL
+    The URL where the archive utility is located. The archive utility is required in order to read the driver catalogs contained within the SPICE guest tools installer.
+    An existing copy is always preferred, and is located by searching the "Toolkit\Tools\<ProcessorArchitecture>" directories, the "Toolkit\Tools\All" directory, and then the "Tools\<ProcessorArchitecture>" directories located within the local download directory ("%WinDir%\Temp\<ScriptBaseName>"). The download only occurs when an existing copy could not be located, and the downloaded package is expanded using an administrative installation so that the product itself is never installed.
 
     .PARAMETER DownloadURL
     The URL where the VirtIO driver ISO is located. If this parameter is not specified, the latest stable VirtIO ISO will be downloaded.
@@ -48,6 +64,16 @@
 
     The QEMU guest agent installation requires the Windows Installer service and is therefore only performed within the full operating system.
 
+    The SPICE guest tools installation is likewise only performed within the full operating system.
+
+    The SPICE guest tools installer is not digitally signed and exposes no version resource, therefore the driver signing certificate(s) are read from the driver catalog files contained within the installer itself. The installer is expanded using an archive utility, every distinct signing certificate is imported into the local machine trusted publishers store, and the expanded content is then removed. This suppresses the driver installation prompts that would otherwise require user interaction.
+
+    The archive utility is located within the "Toolkit\Tools\<ProcessorArchitecture>" directories (for example "X64" followed by "AMD64"), the "Toolkit\Tools\All" directory, and then within the local download directory. An existing copy is always preferred so that a download is avoided, and the download only occurs when no existing copy is present.
+
+    Anything that is downloaded at runtime is written beneath "%WinDir%\Temp\<ScriptBaseName>".
+
+    The SPICE guest tools installer is executed using its own normal installation method so that its standard behavior is preserved.
+
     .LINK
     https://github.com/virtio-win/virtio-win-pkg-scripts
 
@@ -65,6 +91,25 @@
         [Parameter(Mandatory=$False)]
         [Alias('IGA', 'IQGA')]
         [Switch]$InstallGuestAgent,
+
+        [Parameter(Mandatory=$False)]
+        [Alias('ISGT', 'Spice')]
+        [Switch]$InstallSpiceGuestTools,
+
+        [Parameter(Mandatory=$False)]
+        [ValidateNotNullOrEmpty()]
+        [Alias('SGTURL')]
+        [System.URI]$SpiceGuestToolsDownloadURL,
+
+        [Parameter(Mandatory=$False)]
+        [ValidateNotNullOrEmpty()]
+        [Alias('SGTDD')]
+        [System.IO.DirectoryInfo]$SpiceGuestToolsDestinationDirectory,
+
+        [Parameter(Mandatory=$False)]
+        [ValidateNotNullOrEmpty()]
+        [Alias('AUURL')]
+        [System.URI]$ArchiveUtilityDownloadURL,
 
         [Parameter(Mandatory=$False)]
         [ValidateNotNullOrEmpty()]
@@ -130,6 +175,8 @@ Switch (Test-ProcessElevationStatus)
                   #endregion
 
                   #region Set default parameter values
+                    $LocalDownloadDirectory = [System.IO.DirectoryInfo][System.IO.Path]::Combine($Env:Windir, 'Temp', "$($CallingScriptPath.BaseName)")
+
                     Switch ($True)
                       {
                           {([System.String]::IsNullOrEmpty($DownloadURL) -eq $True) -or ([System.String]::IsNullOrWhiteSpace($DownloadURL) -eq $True)}
@@ -140,6 +187,21 @@ Switch (Test-ProcessElevationStatus)
                           {([System.String]::IsNullOrEmpty($DownloadDestinationDirectory) -eq $True) -or ([System.String]::IsNullOrWhiteSpace($DownloadDestinationDirectory) -eq $True)}
                             {
                                 $DownloadDestinationDirectory = [System.IO.DirectoryInfo][System.IO.Path]::Combine($ContentDirectory.FullName, 'ISOs')
+                            }
+
+                          {([System.String]::IsNullOrEmpty($SpiceGuestToolsDownloadURL) -eq $True) -or ([System.String]::IsNullOrWhiteSpace($SpiceGuestToolsDownloadURL) -eq $True)}
+                            {
+                                [System.URI]$SpiceGuestToolsDownloadURL = 'https://www.spice-space.org/download/windows/spice-guest-tools/spice-guest-tools-latest.exe'
+                            }
+
+                          {([System.String]::IsNullOrEmpty($SpiceGuestToolsDestinationDirectory) -eq $True) -or ([System.String]::IsNullOrWhiteSpace($SpiceGuestToolsDestinationDirectory) -eq $True)}
+                            {
+                                $SpiceGuestToolsDestinationDirectory = [System.IO.DirectoryInfo][System.IO.Path]::Combine($LocalDownloadDirectory.FullName, 'Installers')
+                            }
+
+                          {([System.String]::IsNullOrEmpty($ArchiveUtilityDownloadURL) -eq $True) -or ([System.String]::IsNullOrWhiteSpace($ArchiveUtilityDownloadURL) -eq $True)}
+                            {
+                                [System.URI]$ArchiveUtilityDownloadURL = 'https://www.7-zip.org/a/7z2409-x64.msi'
                             }
                       }
                   #endregion
@@ -277,11 +339,18 @@ Switch (Test-ProcessElevationStatus)
 
                     $GuestAgentInstallationRequired = ($InstallGuestAgent.IsPresent -eq $True) -and ($IsWindowsPE -eq $False)
 
+                    $SpiceGuestToolsInstallationRequired = ($InstallSpiceGuestTools.IsPresent -eq $True) -and ($IsWindowsPE -eq $False)
+
                     Switch ($True)
                       {
                           {($InstallGuestAgent.IsPresent -eq $True) -and ($IsWindowsPE -eq $True)}
                             {
                                 $WriteLogMessage.Invoke(0, @("The QEMU guest agent installation will be skipped because it is not supported within Windows PE."))
+                            }
+
+                          {($InstallSpiceGuestTools.IsPresent -eq $True) -and ($IsWindowsPE -eq $True)}
+                            {
+                                $WriteLogMessage.Invoke(0, @("The SPICE guest tools installation will be skipped because it is not supported within Windows PE."))
                             }
                       }
 
@@ -381,7 +450,13 @@ Switch (Test-ProcessElevationStatus)
 
                                               $WriteLogMessage.Invoke(0, @("Latest Available ISO Image: $($ISO.FullName)"))
 
-                                              $ISOImageInfo = Get-DiskImage -ImagePath ($ISO.FullName) -StorageType ISO
+                                              #The disk image cmdlets are projected directly from the storage CIM provider so that the Storage module is not required (It is not present within every Windows PE boot image)
+                                                [System.IO.FileInfo]$DiskImageDefinitionPath = [System.IO.Path]::Combine($ToolkitScriptDirectory.FullName, 'Libraries', 'Storage', 'DiskImage.cdxml')
+
+                                                $Null = Import-Module -Name ($DiskImageDefinitionPath.FullName) -Force -DisableNameChecking -Verbose:$False
+
+                                              #The storage type value of 1 represents an ISO image and the access value of 3 represents read only access
+                                                $ISOImageInfo = Get-ToolkitDiskImage -ImagePath ($ISO.FullName) -StorageType 1
 
                                               Switch ($ISOImageInfo.Attached)
                                                 {
@@ -394,19 +469,22 @@ Switch (Test-ProcessElevationStatus)
                                                       {
                                                           $WriteLogMessage.Invoke(0, @("The specified ISO image requires mounting. Please Wait..."))
 
-                                                          $ISOImageInfo = Mount-DiskImage -ImagePath ($ISO.FullName) -StorageType ISO -Access ReadOnly -PassThru
+                                                          $ISOImageInfo = Mount-ToolkitDiskImage -ImagePath ($ISO.FullName) -StorageType 1 -Access 3 -PassThru
                                                       }
                                                 }
 
                                               $WriteLogMessage.Invoke(0, @("Attempting to get the volume information for the mounted ISO image. Please Wait..."))
 
-                                              $ISOImageVolume = $ISOImageInfo | Get-Volume
+                                              $ISOImageVolume = Get-CimAssociatedInstance -InputObject ($ISOImageInfo) -Association 'MSFT_DiskImageToVolume' -ResultClassName 'MSFT_Volume' -ErrorAction SilentlyContinue | Select-Object -First 1
 
-                                              Switch (([String]::IsNullOrEmpty($ISOImageVolume.DriveLetter) -eq $False) -and ([String]::IsNullOrWhiteSpace($ISOImageVolume.DriveLetter) -eq $False))
+                                              #The drive letter is exposed as a character and is normalized so that an unassigned drive letter is evaluated as an empty value
+                                                [String]$ISOImageDriveLetter = "$($ISOImageVolume.DriveLetter)".Trim([System.Char]0).Trim()
+
+                                              Switch (([String]::IsNullOrEmpty($ISOImageDriveLetter) -eq $False) -and ([String]::IsNullOrWhiteSpace($ISOImageDriveLetter) -eq $False))
                                                 {
                                                     {($_ -eq $True)}
                                                       {
-                                                          $WriteLogMessage.Invoke(0, @("Mounted ISO Image Volume Letter: $($ISOImageVolume.DriveLetter)"))
+                                                          $WriteLogMessage.Invoke(0, @("Mounted ISO Image Volume Letter: $($ISOImageDriveLetter)"))
 
                                                           Try
                                                             {
@@ -460,15 +538,15 @@ Switch (Test-ProcessElevationStatus)
                                                                                                     }
                                                                                               }
 
-                                                                                            $WriteLogMessage.Invoke(0, @("Attempting to search for relevant driver folder(s) located within `"$($ISOImageVolume.DriveLetter):\`". Please Wait..."))
+                                                                                            $WriteLogMessage.Invoke(0, @("Attempting to search for relevant driver folder(s) located within `"$($ISOImageDriveLetter):\`". Please Wait..."))
 
                                                                                             $WriteLogMessage.Invoke(0, @("Operating System Caption: $($WindowsImageDetails.ProductName)", "Operating System Caption Alias: $($OSCaptionAlias)", "Operating System Processor Architecture: $($WindowsImageDetails.ProcessorArchitecture)"))
 
-                                                                                            $VirtIODriverFolderList = Get-ChildItem -Path "$($ISOImageVolume.DriveLetter):\*" -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {($_ -is [System.IO.DirectoryInfo]) -and ($_.FullName -imatch ".*$($OSCaptionAlias).*") -and ($_.FullName -imatch ".*$($WindowsImageDetails.ProcessorArchitecture).*")}
+                                                                                            $VirtIODriverFolderList = Get-ChildItem -Path "$($ISOImageDriveLetter):\*" -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {($_ -is [System.IO.DirectoryInfo]) -and ($_.FullName -imatch ".*$($OSCaptionAlias).*") -and ($_.FullName -imatch ".*$($WindowsImageDetails.ProcessorArchitecture).*")}
 
                                                                                             $VirtIODriverFolderListCount = ($VirtIODriverFolderList | Measure-Object).Count
 
-                                                                                            $WriteLogMessage.Invoke(0, @("Located $($VirtIODriverFolderListCount) relevant driver folder(s) within volume `"$($ISOImageVolume.DriveLetter):\`"."))
+                                                                                            $WriteLogMessage.Invoke(0, @("Located $($VirtIODriverFolderListCount) relevant driver folder(s) within volume `"$($ISOImageDriveLetter):\`"."))
 
                                                                                             Switch ($VirtIODriverFolderListCount -gt 0)
                                                                                               {
@@ -615,7 +693,7 @@ Switch (Test-ProcessElevationStatus)
                                                                                       }
                                                                                 }
 
-                                                                              $GuestAgentMSIPath = [System.IO.FileInfo][System.IO.Path]::Combine("$($ISOImageVolume.DriveLetter):\", 'guest-agent', $GuestAgentMSIName)
+                                                                              $GuestAgentMSIPath = [System.IO.FileInfo][System.IO.Path]::Combine("$($ISOImageDriveLetter):\", 'guest-agent', $GuestAgentMSIName)
 
                                                                               Switch ([System.IO.File]::Exists($GuestAgentMSIPath.FullName))
                                                                                 {
@@ -757,7 +835,7 @@ Switch (Test-ProcessElevationStatus)
                                                           Finally
                                                             {
                                                                 #region Dismount the previously mounted ISO image
-                                                                  $ISOImageInfo = Get-DiskImage -ImagePath ($ISO.FullName) -StorageType ISO
+                                                                  $ISOImageInfo = Get-ToolkitDiskImage -ImagePath ($ISO.FullName) -StorageType 1
 
                                                                   Switch ($ISOImageInfo.Attached)
                                                                     {
@@ -765,7 +843,7 @@ Switch (Test-ProcessElevationStatus)
                                                                           {
                                                                               $WriteLogMessage.Invoke(0, @("Attempting to dismount the previously mounted ISO image. Please Wait...", "ISO Image Path: $($ISO.FullName)"))
 
-                                                                              $Null = Try {Dismount-DiskImage -ImagePath ($ISO.FullName) -StorageType ISO} Catch {}
+                                                                              $Null = Try {Dismount-ToolkitDiskImage -ImagePath ($ISO.FullName) -StorageType 1} Catch {}
                                                                           }
                                                                     }
                                                                 #endregion
@@ -785,6 +863,300 @@ Switch (Test-ProcessElevationStatus)
                           Default
                             {
                                 $WriteLogMessage.Invoke(0, @("Neither the `"-Install`" nor the `"-InstallGuestAgent`" parameter was specified. No further action will be taken."))
+                            }
+                      }
+                  #endregion
+
+                  #region Download and install the SPICE guest tools
+                    Switch ($SpiceGuestToolsInstallationRequired)
+                      {
+                          {($_ -eq $True)}
+                            {
+                                #region Stage the SPICE guest tools installer (Any existing installer within the destination directory is used as-is, otherwise the installer is downloaded)
+                                  Switch ([System.IO.Directory]::Exists($SpiceGuestToolsDestinationDirectory.FullName))
+                                    {
+                                        {($_ -eq $False)}
+                                          {
+                                              $Null = [System.IO.Directory]::CreateDirectory($SpiceGuestToolsDestinationDirectory.FullName)
+                                          }
+                                    }
+
+                                  $ExistingSpiceGuestToolsList = Get-ChildItem -Path ($SpiceGuestToolsDestinationDirectory.FullName) -Filter 'spice-guest-tools*.exe' -Force -ErrorAction SilentlyContinue | Where-Object {($_ -is [System.IO.FileInfo])}
+
+                                  $ExistingSpiceGuestToolsListCount = ($ExistingSpiceGuestToolsList | Measure-Object).Count
+
+                                  Switch ($ExistingSpiceGuestToolsListCount -gt 0)
+                                    {
+                                        {($_ -eq $True)}
+                                          {
+                                              $SpiceGuestToolsPath = $ExistingSpiceGuestToolsList | Sort-Object -Property @('LastWriteTime') -Descending | Select-Object -First 1
+
+                                              $WriteLogMessage.Invoke(0, @("Found $($ExistingSpiceGuestToolsListCount) existing SPICE guest tools installer(s) within `"$($SpiceGuestToolsDestinationDirectory.FullName)`". The download will be skipped.", "Latest Existing Installer: $($SpiceGuestToolsPath.FullName)"))
+                                          }
+
+                                        Default
+                                          {
+                                              $InvokeFileDownloadWithProgressParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+                                                $InvokeFileDownloadWithProgressParameters.URL = $SpiceGuestToolsDownloadURL
+                                                $InvokeFileDownloadWithProgressParameters.Destination = $SpiceGuestToolsDestinationDirectory.FullName
+                                                $InvokeFileDownloadWithProgressParameters.FileName = [System.IO.Path]::GetFileName($SpiceGuestToolsDownloadURL.OriginalString)
+                                                $InvokeFileDownloadWithProgressParameters.ContinueOnError = $False
+                                                $InvokeFileDownloadWithProgressParameters.Verbose = $True
+
+                                              $InvokeFileDownloadWithProgressResult = Invoke-FileDownloadWithProgress @InvokeFileDownloadWithProgressParameters
+
+                                              $SpiceGuestToolsPath = $InvokeFileDownloadWithProgressResult.DownloadPath
+                                          }
+                                    }
+
+                                  $SpiceGuestToolsPath = Get-Item -Path ($SpiceGuestToolsPath.FullName) -Force
+                                #endregion
+
+                                #region Determine whether the SPICE guest tools installation is necessary
+                                  $WriteLogMessage.Invoke(0, @("SPICE Guest Tools Installer Path: $($SpiceGuestToolsPath.FullName)"))
+
+                                  $GetInstalledSoftwareParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+                                    $GetInstalledSoftwareParameters.FilterExpression = {($_.DisplayName -imatch '(^SPICE\s+Guest\s+Tools.*$)')}
+                                    $GetInstalledSoftwareParameters.ContinueOnError = $True
+                                    $GetInstalledSoftwareParameters.Verbose = $False
+
+                                  $GetInstalledSoftwareResult = Get-InstalledSoftware @GetInstalledSoftwareParameters
+
+                                  $InstalledSpiceGuestTools = $GetInstalledSoftwareResult | Select-Object -First 1
+
+                                  Switch ($Null -ieq $InstalledSpiceGuestTools)
+                                    {
+                                        {($_ -eq $True)}
+                                          {
+                                              $WriteLogMessage.Invoke(0, @("The SPICE guest tools are not installed. An installation is necessary."))
+
+                                              [Boolean]$SpiceGuestToolsInstallationNecessary = $True
+                                          }
+
+                                        Default
+                                          {
+                                              $WriteLogMessage.Invoke(0, @("The SPICE guest tools are already installed. The installation will be skipped.", "Installed Version: $($InstalledSpiceGuestTools.DisplayVersion)"))
+
+                                              [Boolean]$SpiceGuestToolsInstallationNecessary = $False
+                                          }
+                                    }
+                                #endregion
+
+                                Switch ($SpiceGuestToolsInstallationNecessary)
+                                  {
+                                      {($_ -eq $True)}
+                                        {
+                                            #region Locate the archive utility that is used to read the driver catalogs contained within the installer (A local copy is preferred so that a download is avoided)
+                                              $ArchiveUtilityPath = $Null
+
+                                              #The architecture specific directories are searched first, followed by the architecture neutral directory. The first alias is also used as the download destination.
+                                                $ArchiveUtilityArchitectureAliasList = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
+
+                                                Switch ("$($Env:PROCESSOR_ARCHITECTURE)")
+                                                  {
+                                                      {($_ -ieq 'AMD64') -or ($_ -ieq 'X64')}
+                                                        {
+                                                            $ArchiveUtilityArchitectureAliasList.Add('X64')
+                                                            $ArchiveUtilityArchitectureAliasList.Add('AMD64')
+                                                        }
+
+                                                      {($_ -ieq 'X86') -or ($_ -ieq 'I386')}
+                                                        {
+                                                            $ArchiveUtilityArchitectureAliasList.Add('X86')
+                                                            $ArchiveUtilityArchitectureAliasList.Add('I386')
+                                                        }
+
+                                                      Default
+                                                        {
+                                                            $ArchiveUtilityArchitectureAliasList.Add("$($Env:PROCESSOR_ARCHITECTURE)")
+                                                        }
+                                                  }
+
+                                              $ArchiveUtilitySearchDirectoryList = New-Object -TypeName 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
+
+                                              ForEach ($ArchiveUtilityArchitectureAlias In $ArchiveUtilityArchitectureAliasList)
+                                                {
+                                                    $ArchiveUtilitySearchDirectoryList.Add([System.IO.Path]::Combine($ToolsDirectory.FullName, $ArchiveUtilityArchitectureAlias))
+                                                }
+
+                                              $ArchiveUtilitySearchDirectoryList.Add([System.IO.Path]::Combine($ToolsDirectory.FullName, 'All'))
+
+                                              ForEach ($ArchiveUtilityArchitectureAlias In $ArchiveUtilityArchitectureAliasList)
+                                                {
+                                                    $ArchiveUtilitySearchDirectoryList.Add([System.IO.Path]::Combine($LocalDownloadDirectory.FullName, 'Tools', $ArchiveUtilityArchitectureAlias))
+                                                }
+
+                                              ForEach ($ArchiveUtilitySearchDirectory In $ArchiveUtilitySearchDirectoryList)
+                                                {
+                                                    $CandidatePath = [System.IO.FileInfo][System.IO.Path]::Combine($ArchiveUtilitySearchDirectory.FullName, '7z.exe')
+
+                                                    Switch (([System.IO.File]::Exists($CandidatePath.FullName) -eq $True) -and ($Null -ieq $ArchiveUtilityPath))
+                                                      {
+                                                          {($_ -eq $True)}
+                                                            {
+                                                                $ArchiveUtilityPath = $CandidatePath
+
+                                                                $WriteLogMessage.Invoke(0, @("Using the local archive utility. [Path: $($ArchiveUtilityPath.FullName)]"))
+                                                            }
+                                                      }
+                                                }
+
+                                              #Download the archive utility only when a local copy could not be located
+                                                Switch ($Null -ieq $ArchiveUtilityPath)
+                                                  {
+                                                      {($_ -eq $True)}
+                                                        {
+                                                            $WriteLogMessage.Invoke(0, @("A local archive utility could not be located and will be downloaded. Please Wait...", "Search Directories: $(($ArchiveUtilitySearchDirectoryList | ForEach-Object {$_.FullName}) -Join ', ')"))
+
+                                                            $ArchiveUtilityDirectory = [System.IO.DirectoryInfo][System.IO.Path]::Combine($LocalDownloadDirectory.FullName, 'Tools', $ArchiveUtilityArchitectureAliasList[0])
+
+                                                            $Null = [System.IO.Directory]::CreateDirectory($ArchiveUtilityDirectory.FullName)
+
+                                                            $InvokeFileDownloadWithProgressParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+                                                              $InvokeFileDownloadWithProgressParameters.URL = $ArchiveUtilityDownloadURL
+                                                              $InvokeFileDownloadWithProgressParameters.Destination = $ArchiveUtilityDirectory.FullName
+                                                              $InvokeFileDownloadWithProgressParameters.FileName = [System.IO.Path]::GetFileName($ArchiveUtilityDownloadURL.OriginalString)
+                                                              $InvokeFileDownloadWithProgressParameters.ContinueOnError = $False
+                                                              $InvokeFileDownloadWithProgressParameters.Verbose = $True
+
+                                                            $InvokeFileDownloadWithProgressResult = Invoke-FileDownloadWithProgress @InvokeFileDownloadWithProgressParameters
+
+                                                            #An administrative installation extracts the archive utility binaries without installing the product
+                                                              $ArchiveUtilityExtractionDirectory = [System.IO.DirectoryInfo][System.IO.Path]::Combine($ArchiveUtilityDirectory.FullName, 'Extracted')
+
+                                                              $StartProcessWithOutputParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+                                                                $StartProcessWithOutputParameters.FilePath = 'msiexec.exe'
+                                                                $StartProcessWithOutputParameters.ArgumentList = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
+                                                                  $StartProcessWithOutputParameters.ArgumentList.Add('/a')
+                                                                  $StartProcessWithOutputParameters.ArgumentList.Add("`"$($InvokeFileDownloadWithProgressResult.DownloadPath.FullName)`"")
+                                                                  $StartProcessWithOutputParameters.ArgumentList.Add('/qn')
+                                                                  $StartProcessWithOutputParameters.ArgumentList.Add("TARGETDIR=`"$($ArchiveUtilityExtractionDirectory.FullName)`"")
+                                                                $StartProcessWithOutputParameters.AcceptableExitCodeList = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
+                                                                  $StartProcessWithOutputParameters.AcceptableExitCodeList.Add('0')
+                                                                $StartProcessWithOutputParameters.CreateNoWindow = $True
+                                                                $StartProcessWithOutputParameters.ExecutionTimeout = [System.TimeSpan]::FromMinutes(5)
+                                                                $StartProcessWithOutputParameters.ExecutionTimeoutInterval = [System.TimeSpan]::FromSeconds(5)
+                                                                $StartProcessWithOutputParameters.LogOutput = $True
+                                                                $StartProcessWithOutputParameters.ContinueOnError = $False
+                                                                $StartProcessWithOutputParameters.Verbose = $True
+
+                                                              $Null = Start-ProcessWithOutput @StartProcessWithOutputParameters
+
+                                                              $ArchiveUtilityPath = Get-ChildItem -Path ($ArchiveUtilityExtractionDirectory.FullName) -Filter '7z.exe' -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {($_ -is [System.IO.FileInfo])} | Select-Object -First 1
+
+                                                              Switch ($Null -ieq $ArchiveUtilityPath)
+                                                                {
+                                                                    {($_ -eq $True)}
+                                                                      {
+                                                                          Throw "The archive utility could not be located following its extraction. [Path: $($ArchiveUtilityExtractionDirectory.FullName)]"
+                                                                      }
+                                                                }
+
+                                                              $WriteLogMessage.Invoke(0, @("Using the downloaded archive utility. [Path: $($ArchiveUtilityPath.FullName)]"))
+                                                        }
+                                                  }
+                                            #endregion
+
+                                            #region Extract the installer so that the driver signing certificate(s) can be read from the driver catalogs contained within it
+                                              $SpiceGuestToolsExtractionDirectory = [System.IO.DirectoryInfo][System.IO.Path]::Combine($SpiceGuestToolsDestinationDirectory.FullName, "$($SpiceGuestToolsPath.BaseName)_Extracted")
+
+                                              Switch ([System.IO.Directory]::Exists($SpiceGuestToolsExtractionDirectory.FullName))
+                                                {
+                                                    {($_ -eq $True)}
+                                                      {
+                                                          $Null = Remove-Item -Path ($SpiceGuestToolsExtractionDirectory.FullName) -Recurse -Force -Confirm:$False
+                                                      }
+                                                }
+
+                                              $Null = [System.IO.Directory]::CreateDirectory($SpiceGuestToolsExtractionDirectory.FullName)
+
+                                              $WriteLogMessage.Invoke(0, @("Attempting to extract the SPICE guest tools installer. Please Wait...", "Extraction Path: $($SpiceGuestToolsExtractionDirectory.FullName)"))
+
+                                              $StartProcessWithOutputParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+                                                $StartProcessWithOutputParameters.FilePath = $ArchiveUtilityPath.FullName
+                                                $StartProcessWithOutputParameters.ArgumentList = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
+                                                  $StartProcessWithOutputParameters.ArgumentList.Add('x')
+                                                  $StartProcessWithOutputParameters.ArgumentList.Add("`"$($SpiceGuestToolsPath.FullName)`"")
+                                                  $StartProcessWithOutputParameters.ArgumentList.Add("`"-o$($SpiceGuestToolsExtractionDirectory.FullName)`"")
+                                                  $StartProcessWithOutputParameters.ArgumentList.Add('-y')
+                                                $StartProcessWithOutputParameters.AcceptableExitCodeList = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
+                                                  $StartProcessWithOutputParameters.AcceptableExitCodeList.Add('0')
+                                                  $StartProcessWithOutputParameters.AcceptableExitCodeList.Add('1')
+                                                $StartProcessWithOutputParameters.CreateNoWindow = $True
+                                                $StartProcessWithOutputParameters.ExecutionTimeout = [System.TimeSpan]::FromMinutes(10)
+                                                $StartProcessWithOutputParameters.ExecutionTimeoutInterval = [System.TimeSpan]::FromSeconds(5)
+                                                $StartProcessWithOutputParameters.LogOutput = $False
+                                                $StartProcessWithOutputParameters.ContinueOnError = $False
+                                                $StartProcessWithOutputParameters.Verbose = $True
+
+                                              $Null = Start-ProcessWithOutput @StartProcessWithOutputParameters
+                                            #endregion
+
+                                            #region Import the driver signing certificate(s) into the trusted publishers store so that the driver installation prompts are suppressed
+                                              $WriteLogMessage.Invoke(0, @("Attempting to import the driver signing certificate(s) contained within the SPICE guest tools installer into the trusted publishers store. Please Wait..."))
+
+                                              $ImportTrustedPublisherCertificateParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+                                                $ImportTrustedPublisherCertificateParameters.SearchDirectory = $SpiceGuestToolsExtractionDirectory.FullName
+                                                $ImportTrustedPublisherCertificateParameters.SearchFilter = '*.cat'
+                                                $ImportTrustedPublisherCertificateParameters.ContinueOnError = $True
+                                                $ImportTrustedPublisherCertificateParameters.Verbose = $True
+
+                                              $ImportTrustedPublisherCertificateResult = Import-TrustedPublisherCertificate @ImportTrustedPublisherCertificateParameters
+
+                                              ForEach ($ImportedCertificate In $ImportTrustedPublisherCertificateResult)
+                                                {
+                                                    $WriteLogMessage.Invoke(0, @("Driver Signing Certificate: $($ImportedCertificate.Subject)", "Thumbprint: $($ImportedCertificate.Thumbprint)", "Already Present: $($ImportedCertificate.AlreadyPresent)"))
+                                                }
+                                            #endregion
+
+                                            #region Install the SPICE guest tools silently by using the normal installation method of the installer
+                                              $WriteLogMessage.Invoke(0, @("Attempting to install the SPICE guest tools. Please Wait..."))
+
+                                              $StartProcessWithOutputParameters = New-Object -TypeName 'System.Collections.Specialized.OrderedDictionary'
+                                                $StartProcessWithOutputParameters.FilePath = $SpiceGuestToolsPath.FullName
+                                                $StartProcessWithOutputParameters.ArgumentList = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
+                                                  $StartProcessWithOutputParameters.ArgumentList.Add('/S')
+                                                $StartProcessWithOutputParameters.AcceptableExitCodeList = New-Object -TypeName 'System.Collections.Generic.List[System.String]'
+                                                  $StartProcessWithOutputParameters.AcceptableExitCodeList.Add('0')
+                                                  $StartProcessWithOutputParameters.AcceptableExitCodeList.Add('3010')
+                                                  $StartProcessWithOutputParameters.AcceptableExitCodeList.Add('1641')
+                                                $StartProcessWithOutputParameters.CreateNoWindow = $True
+                                                $StartProcessWithOutputParameters.ExecutionTimeout = [System.TimeSpan]::FromMinutes(15)
+                                                $StartProcessWithOutputParameters.ExecutionTimeoutInterval = [System.TimeSpan]::FromSeconds(5)
+                                                $StartProcessWithOutputParameters.LogOutput = $True
+                                                $StartProcessWithOutputParameters.ContinueOnError = $False
+                                                $StartProcessWithOutputParameters.Verbose = $True
+
+                                              $StartProcessWithOutputResult = Start-ProcessWithOutput @StartProcessWithOutputParameters
+
+                                              #Verify the state of the SPICE guest tools service
+                                                $SpiceGuestToolsService = Get-Service | Where-Object {($_.Name -imatch '(^(vdservice|spice\-agent|vdagent).*$)') -or ($_.DisplayName -imatch '(^.*SPICE.*(agent|service).*$)')} | Select-Object -First 1
+
+                                                Switch ($Null -ine $SpiceGuestToolsService)
+                                                  {
+                                                      {($_ -eq $True)}
+                                                        {
+                                                            $WriteLogMessage.Invoke(0, @("SPICE Guest Tools Service Name: $($SpiceGuestToolsService.Name)", "SPICE Guest Tools Service Display Name: $($SpiceGuestToolsService.DisplayName)", "SPICE Guest Tools Service Status: $($SpiceGuestToolsService.Status)"))
+                                                        }
+
+                                                      Default
+                                                        {
+                                                            $WriteLogMessage.Invoke(2, @("The SPICE guest tools service could not be found following the installation."))
+                                                        }
+                                                  }
+                                            #endregion
+
+                                            #region Remove the extracted installer contents because they are only required in order to read the driver signing certificate(s)
+                                              Switch ([System.IO.Directory]::Exists($SpiceGuestToolsExtractionDirectory.FullName))
+                                                {
+                                                    {($_ -eq $True)}
+                                                      {
+                                                          $Null = Try {Remove-Item -Path ($SpiceGuestToolsExtractionDirectory.FullName) -Recurse -Force -Confirm:$False} Catch {}
+                                                      }
+                                                }
+                                            #endregion
+                                        }
+                                  }
                             }
                       }
                   #endregion

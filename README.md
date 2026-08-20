@@ -8,41 +8,67 @@ This script can also be directly used within the full operating system to instal
 
 ## Structure
 
-The script follows the standardized script template and toolkit flow. The `Toolkit\Toolkit.ps1` script is dot sourced during initialization and provides the logging, error handling, environment detection, and function/module/library loading infrastructure. The reusable helper functions live within `Toolkit\Functions`, and the registry parsing libraries live within `Toolkit\Libraries\Registry`.
+The script follows the standardized script template and toolkit flow. The `Toolkit\Toolkit.ps1` script is dot sourced during initialization and provides the logging, error handling, environment detection, and function/module/library loading infrastructure. The reusable helper functions live within `Toolkit\Functions`, the registry parsing libraries live within `Toolkit\Libraries\Registry`, the disk image cmdlet definition lives within `Toolkit\Libraries\Storage`, and the archive utility lives within `Toolkit\Tools`.
+
+The ISO is mounted through the storage CIM provider directly rather than through the `Storage` PowerShell module, because that module is not present within every WindowsPE boot image. The `MSFT_DiskImage` class is projected as cmdlets using the `Toolkit\Libraries\Storage\DiskImage.cdxml` definition, so only the storage CIM provider itself is required.
 
 The script is compatible with both Windows PowerShell 5.1 (including the WindowsPE PowerShell optional component) and PowerShell 7.
 
 ## Usage
 
-```powershell
-#Install the VirtIO drivers and the QEMU guest agent (works in WindowsPE and the full operating system - the guest agent portion is skipped automatically within WindowsPE and when it is already installed)
-powershell.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
+**WindowsPE (boot image)** — DeployR boot images only contain PowerShell 7, so use `pwsh.exe`:
 
-#Same command using PowerShell 7 (required within DeployR boot images)
-pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
+```powershell
+pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent -InstallSpiceGuestTools
 ```
+
+**Full operating system**:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent -InstallSpiceGuestTools
+```
+
+**The same switches are safe to use in both places.** Everything is gated in code, so nothing breaks:
+
+- Within WindowsPE, `-InstallGuestAgent` and `-InstallSpiceGuestTools` are **skipped automatically** (both require the full operating system) and the skip is logged. Only the driver injection runs.
+- Within the full operating system, all three run.
+- The guest agent is skipped when the installed version is already current, and the SPICE guest tools are skipped when already installed.
+
+That means you can use one command line for both passes and let the script decide what applies.
 
 | Parameter | Description |
 |:--|:--|
 | `-Install` | Download the VirtIO driver ISO (if required) and install the relevant drivers for the detected operating system. |
 | `-InstallGuestAgent` | Install the QEMU guest agent from the mounted ISO. Recommended on every run: the installation is skipped automatically within WindowsPE (where the Windows Installer service is unavailable) and when the installed version is already current. |
+| `-InstallSpiceGuestTools` | Download and install the SPICE guest tools. Skipped automatically within WindowsPE and when already installed. The driver signing certificates are imported into the trusted publishers store beforehand so the installation is completely silent. |
 | `-DownloadURL` | Override the VirtIO ISO download URL. Defaults to the latest stable VirtIO ISO. |
 | `-DownloadDestinationDirectory` | Override the ISO download destination. Defaults to `Content\ISOs` beside the script. Any ISO already present there is used as-is regardless of its file name (the latest one wins), and the download is skipped entirely. |
+| `-SpiceGuestToolsDownloadURL` | Override the SPICE guest tools download URL. |
+| `-SpiceGuestToolsDestinationDirectory` | Override the SPICE guest tools download destination. |
+| `-ArchiveUtilityDownloadURL` | Override the archive utility download URL, used only when no local copy is present. |
 | `-LogDirectory` | Override the log directory. Sensible defaults are used for WindowsPE, task sequence, and full operating system scenarios. |
 
 The ISO download automatically detects and uses the system default proxy with default credentials.
+
+Anything downloaded at runtime is written beneath `%WinDir%\Temp\Invoke-VirtIODrivers`, so running the script from a read-only or UNC location is not a problem.
+
+## SPICE guest tools
+
+The SPICE guest tools installer is not digitally signed and exposes no version resource, so the driver signing certificates are read from the driver catalogs contained **within the installer itself**. The installer is expanded using the archive utility in `Toolkit\Tools`, every distinct signing certificate is imported into the local machine trusted publishers store, the expanded content is removed, and the installer is then executed using its own normal installation method. The result is a completely silent installation with no driver prompts.
+
+The archive utility is located in `Toolkit\Tools\<ProcessorArchitecture>` (for example `X64`), then `Toolkit\Tools\All`, and finally the local download directory. A copy ships with the toolkit, so no download is required; if one is ever needed, the package is expanded using an administrative installation and the product itself is never installed.
 
 ## OS deployment scenarios (DeployR, MDT, SCCM)
 
 During OS deployment the script needs to run **twice**:
 
-1. **Boot image (WindowsPE)** — after the operating system image has been applied, run with `-Install -InstallGuestAgent` to inject the VirtIO drivers into the offline operating system using DISM, so the deployed OS can boot on VirtIO virtual hardware on first startup (the guest agent portion is skipped automatically within WindowsPE).
-2. **Full operating system** — run the same command again to register the drivers with pnputil and install the QEMU guest agent.
+1. **Boot image (WindowsPE)** — after the operating system image has been applied, run with `-Install -InstallGuestAgent -InstallSpiceGuestTools` to inject the VirtIO drivers into the offline operating system using DISM, so the deployed OS can boot on VirtIO virtual hardware on first startup (the guest agent and SPICE guest tools portions are skipped automatically within WindowsPE).
+2. **Full operating system** — run the same command again to register the drivers with pnputil, install the QEMU guest agent, and install the SPICE guest tools.
 
 OS detection is handled automatically in both passes, so the command line is the same aside from the interpreter. DeployR boot images only contain PowerShell 7, so the script must be launched with `pwsh.exe` there:
 
 ```powershell
-pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent
+pwsh.exe -ExecutionPolicy Bypass -NoProfile -NoLogo -File ".\Invoke-VirtIODrivers.ps1" -Install -InstallGuestAgent -InstallSpiceGuestTools
 ```
 
 Note: the boot image itself must already contain the VirtIO drivers (added ahead of time using your preferred boot image servicing method), otherwise WindowsPE cannot see VirtIO SCSI disks or network adapters. Alternatively, the virtual machine can use non-VirtIO virtual hardware (for example SATA disks and an emulated E1000 network adapter), which works without servicing the boot image but carries a performance penalty.
