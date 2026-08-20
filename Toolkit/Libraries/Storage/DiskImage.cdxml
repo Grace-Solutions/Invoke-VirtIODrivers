@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Projects the "MSFT_DiskImage" class of the storage CIM provider as PowerShell cmdlets.
+
+    This definition exists so that ISO images can be mounted and dismounted without the "Storage" module, which is not present within every Windows PE boot image.
+    Only the storage CIM provider itself is required.
+
+    The generated cmdlets are "Get-ToolkitDiskImage", "Mount-ToolkitDiskImage", and "Dismount-ToolkitDiskImage".
+
+    The "Access" parameter uses the value map defined by the provider, where 0 is Unknown, 2 is ReadWrite, and 3 is ReadOnly.
+-->
+<PowerShellMetadata xmlns="http://schemas.microsoft.com/cmdlets-over-objects/2009/11">
+  <Class ClassName="ROOT/Microsoft/Windows/Storage/MSFT_DiskImage">
+    <Version>1.0.0.0</Version>
+    <DefaultNoun>ToolkitDiskImage</DefaultNoun>
+    <InstanceCmdlets>
+      <GetCmdletParameters DefaultCmdletParameterSet="ByImagePath">
+        <QueryOptions>
+          <Option OptionName="ImagePath">
+            <Type PSType="System.String[]" />
+            <CmdletParameterMetadata ValueFromPipeline="true" ValueFromPipelineByPropertyName="true" IsMandatory="true" CmdletParameterSets="ByImagePath" Position="0" />
+          </Option>
+          <Option OptionName="VirtualStorageTypeDeviceId">
+            <Type PSType="System.UInt32" />
+            <CmdletParameterMetadata ValueFromPipelineByPropertyName="true" PSName="StorageType" />
+          </Option>
+        </QueryOptions>
+      </GetCmdletParameters>
+      <Cmdlet>
+        <CmdletMetadata Verb="Mount" ConfirmImpact="Medium" />
+        <Method MethodName="Mount">
+          <Parameters>
+            <Parameter ParameterName="Access">
+              <Type PSType="System.UInt16" />
+              <CmdletParameterMetadata />
+            </Parameter>
+            <Parameter ParameterName="NoDriveLetter">
+              <Type PSType="System.Management.Automation.SwitchParameter" />
+              <CmdletParameterMetadata />
+            </Parameter>
+            <Parameter ParameterName="cim:OperationOption:PassThru">
+              <Type PSType="System.Management.Automation.SwitchParameter" />
+              <CmdletParameterMetadata PSName="PassThru" />
+            </Parameter>
+            <Parameter ParameterName="DiskImage">
+              <Type PSType="Microsoft.Management.Infrastructure.CimInstance" ETSType="Microsoft.Management.Infrastructure.CimInstance#MSFT_DiskImage" />
+              <CmdletOutputMetadata />
+            </Parameter>
+            <Parameter ParameterName="cim:operationOption:SourceCaller" DefaultValue="Microsoft.PowerShell">
+              <Type PSType="System.String" />
+            </Parameter>
+          </Parameters>
+        </Method>
+        <GetCmdletParameters DefaultCmdletParameterSet="ByImagePath">
+          <QueryOptions>
+            <Option OptionName="ImagePath">
+              <Type PSType="System.String[]" />
+              <CmdletParameterMetadata ValueFromPipeline="true" ValueFromPipelineByPropertyName="true" IsMandatory="true" CmdletParameterSets="ByImagePath" Position="0" />
+            </Option>
+            <Option OptionName="VirtualStorageTypeDeviceId">
+              <Type PSType="System.UInt32" />
+              <CmdletParameterMetadata ValueFromPipelineByPropertyName="true" PSName="StorageType" />
+            </Option>
+          </QueryOptions>
+        </GetCmdletParameters>
+      </Cmdlet>
+      <Cmdlet>
+        <CmdletMetadata Verb="Dismount" ConfirmImpact="Medium" />
+        <Method MethodName="Dismount">
+          <Parameters>
+            <Parameter ParameterName="DiskImage">
+              <Type PSType="Microsoft.Management.Infrastructure.CimInstance" ETSType="Microsoft.Management.Infrastructure.CimInstance#MSFT_DiskImage" />
+              <CmdletOutputMetadata />
+            </Parameter>
+            <Parameter ParameterName="cim:operationOption:SourceCaller" DefaultValue="Microsoft.PowerShell">
+              <Type PSType="System.String" />
+            </Parameter>
+          </Parameters>
+        </Method>
+        <GetCmdletParameters DefaultCmdletParameterSet="ByImagePath">
+          <QueryOptions>
+            <Option OptionName="ImagePath">
+              <Type PSType="System.String[]" />
+              <CmdletParameterMetadata ValueFromPipeline="true" ValueFromPipelineByPropertyName="true" IsMandatory="true" CmdletParameterSets="ByImagePath" Position="0" />
+            </Option>
+            <Option OptionName="VirtualStorageTypeDeviceId">
+              <Type PSType="System.UInt32" />
+              <CmdletParameterMetadata ValueFromPipelineByPropertyName="true" PSName="StorageType" />
+            </Option>
+          </QueryOptions>
+        </GetCmdletParameters>
+      </Cmdlet>
+    </InstanceCmdlets>
+  </Class>
+</PowerShellMetadata>
